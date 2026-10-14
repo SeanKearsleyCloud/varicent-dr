@@ -29,7 +29,7 @@ replicated_vms = {
     target_rg                       = "RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01"
     base_rg                         = "RG-CC-IG-LGCY-NONPRD-CMOD-APPS-01"
     recovery_vm_name                = "FCOCOMDBL4-replicated"
-    replication_protected_item_name = "Ke-xL6NZjeoCfBXRu3iHZfkRbx7ATNyAgCTIOhMpGds"
+    replication_protected_item_name = "FCOCOMDBL4-replicated"
     replication_policy_name         = "Daily"
     disks = [
       "FCOCOMDBL4-OSdisk-00",
@@ -44,7 +44,7 @@ replicated_vms = {
     target_rg                       = "RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01"
     base_rg                         = "RG-CC-IG-LGCY-NONPRD-CMOD-APPS-01"
     recovery_vm_name                = "FCOCOMFSD1-replicated"
-    replication_protected_item_name = "PA33nv95n23AevX_WukDmXfSTg0OMX-I_SqA7yM8PT0"
+    replication_protected_item_name = "FCOCOMFSD1-replicated"
     replication_policy_name         = "12HR-Replication-Policy"
     disks = [
       "FCOCOMFSD1-OSdisk-00",
