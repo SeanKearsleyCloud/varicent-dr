@@ -7,9 +7,9 @@ secondary_protection_container_name = "asr-a2a-default-canadaeast-container"
 secondary_fabric_name               = "asr-a2a-default-canadaeast"
 
 # Staging Storage Accounts
-primary_staging_storage_account_name   = "dq4cj1rsvcenonasrcache"
+primary_staging_storage_account_name   = "dq4cj1rsvcenonasrcache1"
 primary_staging_resource_group_name    = "RG-CE-NONPRD-IGM-LGCY-RSV"
-secondary_staging_storage_account_name = "l8inoorsvcenonasrcache"
+secondary_staging_storage_account_name = "l8inoorsvcenonasrcache1"
 
 # Recovery Services Vault (RSV) Configuration
 recovery_services_vault_name    = "RSV-CE-NONPRD-IGM-LGCY"
