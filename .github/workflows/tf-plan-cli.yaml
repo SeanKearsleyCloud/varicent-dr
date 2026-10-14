@@ -1,0 +1,217 @@
+name: Terraform CLI Plan
+
+on:
+  workflow_call:
+    inputs:
+      TF_WORKSPACE:
+        required: true
+        type: string
+      CONFIG_DIRECTORY:
+        required: false
+        type: string
+        default: "./"
+      TF_VARS_FILE:
+        required: false
+        type: string
+        default: ""
+      TF_VARS_INJECTION:
+        required: false
+        type: string
+        default: ""
+      PULL_REQUEST_NUMBER:
+        required: false
+        type: string
+        default: ""
+      tfc_organization:
+        description: "Terraform Cloud organization name"
+        required: false
+        type: string
+        default: "sean-kearsley-priv-tenant"
+    secrets:
+      TFC_TOKEN:
+        required: true
+      TF_VARS_INJECTION:
+        required: false
+      TF_VARS_INJECTION_1:
+        required: false
+      TF_VARS_INJECTION_2:
+        required: false
+      TF_VARS_INJECTION_3:
+        required: false
+      TF_VARS_INJECTION_4:
+        required: false
+      TF_VARS_INJECTION_5:
+        required: false
+
+jobs:
+  terraform-plan:
+    name: Terraform CLI Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TFC_TOKEN }}
+      TF_IN_AUTOMATION: true
+      TF_CLI_ARGS_plan: -lock-timeout=6h
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Configure Terraform Cloud backend
+        env:
+          CONFIG_DIRECTORY: ${{ inputs.CONFIG_DIRECTORY }}
+          TFC_ORGANIZATION: ${{ inputs.tfc_organization }}
+          TF_WORKSPACE_NAME: ${{ inputs.TF_WORKSPACE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -d "$CONFIG_DIRECTORY" ]]; then
+            echo "Configuration directory not found: $CONFIG_DIRECTORY" >&2
+            exit 1
+          fi
+
+          if [[ ! "$TFC_ORGANIZATION" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "Invalid Terraform Cloud organization: $TFC_ORGANIZATION" >&2
+            exit 1
+          fi
+
+          if [[ ! "$TF_WORKSPACE_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "Invalid Terraform Cloud workspace: $TF_WORKSPACE_NAME" >&2
+            exit 1
+          fi
+
+          cat > "$CONFIG_DIRECTORY/backend.tf" <<EOF
+          terraform {
+            cloud {
+              organization = "$TFC_ORGANIZATION"
+
+              workspaces {
+                name = "$TF_WORKSPACE_NAME"
+              }
+            }
+          }
+          EOF
+
+      - name: Prepare Terraform variables
+        env:
+          CONFIG_DIRECTORY: ${{ inputs.CONFIG_DIRECTORY }}
+          TF_VARS_FILE: ${{ inputs.TF_VARS_FILE }}
+          INPUT_TF_VARS_INJECTION: ${{ inputs.TF_VARS_INJECTION }}
+          TF_VARS_INJECTION: ${{ secrets.TF_VARS_INJECTION }}
+          TF_VARS_INJECTION_1: ${{ secrets.TF_VARS_INJECTION_1 }}
+          TF_VARS_INJECTION_2: ${{ secrets.TF_VARS_INJECTION_2 }}
+          TF_VARS_INJECTION_3: ${{ secrets.TF_VARS_INJECTION_3 }}
+          TF_VARS_INJECTION_4: ${{ secrets.TF_VARS_INJECTION_4 }}
+          TF_VARS_INJECTION_5: ${{ secrets.TF_VARS_INJECTION_5 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_file="$CONFIG_DIRECTORY/terraform.tfvars"
+          if [[ -n "$TF_VARS_FILE" ]]; then
+            if [[ ! -f "$TF_VARS_FILE" ]]; then
+              echo "TF vars file not found: $TF_VARS_FILE" >&2
+              exit 1
+            fi
+            cp "$TF_VARS_FILE" "$target_file"
+          fi
+
+          for value in "$INPUT_TF_VARS_INJECTION" "$TF_VARS_INJECTION" "$TF_VARS_INJECTION_1" "$TF_VARS_INJECTION_2" "$TF_VARS_INJECTION_3" "$TF_VARS_INJECTION_4" "$TF_VARS_INJECTION_5"; do
+            if [[ -n "$value" ]]; then
+              printf '\n%s\n' "$value" >> "$target_file"
+            fi
+          done
+
+      - name: Initialize Terraform
+        working-directory: ${{ inputs.CONFIG_DIRECTORY }}
+        run: terraform init -input=false -no-color
+
+      - name: Terraform plan
+        id: plan
+        working-directory: ${{ inputs.CONFIG_DIRECTORY }}
+        shell: bash
+        run: |
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode 2>&1 | tee plan-output.txt
+          exit_code=${PIPESTATUS[0]}
+          set -e
+
+          if [[ "$exit_code" -ne 0 && "$exit_code" -ne 2 ]]; then
+            exit "$exit_code"
+          fi
+
+          summary_line="$(grep -E '^(No changes\.|Plan: [0-9]+ to add, [0-9]+ to change, [0-9]+ to destroy\.)' plan-output.txt | tail -n1 || true)"
+          if [[ -z "$summary_line" ]]; then
+            summary_line="Terraform plan completed successfully."
+          fi
+
+          {
+            echo "summary_line=$summary_line"
+            echo "plan_output<<EOF"
+            sed -n '1,1200p' plan-output.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update PR
+        if: ${{ inputs.PULL_REQUEST_NUMBER != '' }}
+        uses: actions/github-script@v8
+        env:
+          PLAN_OUTPUT: ${{ steps.plan.outputs.plan_output }}
+          PLAN_SUMMARY: ${{ steps.plan.outputs.summary_line }}
+          TF_WORKSPACE_NAME: ${{ inputs.TF_WORKSPACE }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const prNumber = Number('${{ inputs.PULL_REQUEST_NUMBER }}');
+            if (!Number.isInteger(prNumber) || prNumber <= 0) {
+              throw new Error(`Invalid PULL_REQUEST_NUMBER input: ${{ inputs.PULL_REQUEST_NUMBER }}`);
+            }
+
+            const marker = `Terraform CLI Plan Output (${process.env.TF_WORKSPACE_NAME})`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const previousComment = comments.find((comment) =>
+              comment.user.type === 'Bot' && comment.body.includes(marker)
+            );
+            const planOutput = process.env.PLAN_OUTPUT.length > 60000
+              ? `${process.env.PLAN_OUTPUT.slice(0, 60000)}\n\n...(truncated)...`
+              : process.env.PLAN_OUTPUT;
+            const body = `#### ${marker}
+            \`\`\`
+            ${process.env.PLAN_SUMMARY}
+            \`\`\`
+
+            <details>
+            <summary>Terraform plan output</summary>
+
+            \`\`\`
+            ${planOutput}
+            \`\`\`
+            </details>`;
+
+            if (previousComment) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previousComment.id,
+              });
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body,
+            });

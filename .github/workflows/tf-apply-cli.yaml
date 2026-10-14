@@ -1,0 +1,141 @@
+name: Terraform CLI Apply
+
+on:
+  workflow_call:
+    inputs:
+      TF_WORKSPACE:
+        required: true
+        type: string
+      CONFIG_DIRECTORY:
+        required: false
+        type: string
+        default: "./"
+      TF_VARS_FILE:
+        required: false
+        type: string
+        default: ""
+      TF_VARS_INJECTION:
+        required: false
+        type: string
+        default: ""
+      tfc_organization:
+        description: "Terraform Cloud organization name"
+        required: false
+        type: string
+        default: "sean-kearsley-priv-tenant"
+    secrets:
+      TFC_TOKEN:
+        required: true
+      TF_VARS_INJECTION:
+        required: false
+      TF_VARS_INJECTION_1:
+        required: false
+      TF_VARS_INJECTION_2:
+        required: false
+      TF_VARS_INJECTION_3:
+        required: false
+      TF_VARS_INJECTION_4:
+        required: false
+      TF_VARS_INJECTION_5:
+        required: false
+
+jobs:
+  terraform-apply:
+    name: Terraform CLI Apply
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    env:
+      TF_TOKEN_app_terraform_io: ${{ secrets.TFC_TOKEN }}
+      TF_IN_AUTOMATION: true
+      TF_CLI_ARGS_apply: -lock-timeout=6h
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Enforce main branch
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "ERROR: applies are only allowed from the main branch." >&2
+            echo "You triggered this from: $GITHUB_REF" >&2
+            exit 1
+          fi
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+
+      - name: Configure Terraform Cloud backend
+        env:
+          CONFIG_DIRECTORY: ${{ inputs.CONFIG_DIRECTORY }}
+          TFC_ORGANIZATION: ${{ inputs.tfc_organization }}
+          TF_WORKSPACE_NAME: ${{ inputs.TF_WORKSPACE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -d "$CONFIG_DIRECTORY" ]]; then
+            echo "Configuration directory not found: $CONFIG_DIRECTORY" >&2
+            exit 1
+          fi
+
+          if [[ ! "$TFC_ORGANIZATION" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "Invalid Terraform Cloud organization: $TFC_ORGANIZATION" >&2
+            exit 1
+          fi
+
+          if [[ ! "$TF_WORKSPACE_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "Invalid Terraform Cloud workspace: $TF_WORKSPACE_NAME" >&2
+            exit 1
+          fi
+
+          cat > "$CONFIG_DIRECTORY/backend.tf" <<EOF
+          terraform {
+            cloud {
+              organization = "$TFC_ORGANIZATION"
+
+              workspaces {
+                name = "$TF_WORKSPACE_NAME"
+              }
+            }
+          }
+          EOF
+
+      - name: Prepare Terraform variables
+        env:
+          CONFIG_DIRECTORY: ${{ inputs.CONFIG_DIRECTORY }}
+          TF_VARS_FILE: ${{ inputs.TF_VARS_FILE }}
+          INPUT_TF_VARS_INJECTION: ${{ inputs.TF_VARS_INJECTION }}
+          TF_VARS_INJECTION: ${{ secrets.TF_VARS_INJECTION }}
+          TF_VARS_INJECTION_1: ${{ secrets.TF_VARS_INJECTION_1 }}
+          TF_VARS_INJECTION_2: ${{ secrets.TF_VARS_INJECTION_2 }}
+          TF_VARS_INJECTION_3: ${{ secrets.TF_VARS_INJECTION_3 }}
+          TF_VARS_INJECTION_4: ${{ secrets.TF_VARS_INJECTION_4 }}
+          TF_VARS_INJECTION_5: ${{ secrets.TF_VARS_INJECTION_5 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_file="$CONFIG_DIRECTORY/terraform.tfvars"
+          if [[ -n "$TF_VARS_FILE" ]]; then
+            if [[ ! -f "$TF_VARS_FILE" ]]; then
+              echo "TF vars file not found: $TF_VARS_FILE" >&2
+              exit 1
+            fi
+            cp "$TF_VARS_FILE" "$target_file"
+          fi
+
+          for value in "$INPUT_TF_VARS_INJECTION" "$TF_VARS_INJECTION" "$TF_VARS_INJECTION_1" "$TF_VARS_INJECTION_2" "$TF_VARS_INJECTION_3" "$TF_VARS_INJECTION_4" "$TF_VARS_INJECTION_5"; do
+            if [[ -n "$value" ]]; then
+              printf '\n%s\n' "$value" >> "$target_file"
+            fi
+          done
+
+      - name: Initialize Terraform
+        working-directory: ${{ inputs.CONFIG_DIRECTORY }}
+        run: terraform init -input=false -no-color
+
+      - name: Terraform apply
+        working-directory: ${{ inputs.CONFIG_DIRECTORY }}
+        run: terraform apply -input=false -auto-approve -no-color

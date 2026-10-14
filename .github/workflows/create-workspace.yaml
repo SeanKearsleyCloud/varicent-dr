@@ -1,0 +1,293 @@
+name: Create Terraform Workspace
+
+on:
+  workflow_call:
+    inputs:
+      organization:
+        required: true
+        type: string
+      workspace_name:
+        required: true
+        type: string
+      workspace_project:
+        required: true
+        type: string
+      terraform_version:
+        required: false
+        type: string
+        default: ""
+      working_directory:
+        required: false
+        type: string
+        default: ""
+      vcs_branch:
+        required: false
+        type: string
+        default: ""
+      vcs_tags_regex:
+        required: false
+        type: string
+        default: ""
+      enable_tfe_token_env_var:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      TFC_TOKEN:
+        required: true
+      VCS_OAUTH_TOKEN_ID:
+        required: false
+
+jobs:
+  create-workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Workspace via Terraform Cloud API
+        env:
+          TFC_TOKEN: ${{ secrets.TFC_TOKEN }}
+          ORG: ${{ inputs.organization }}
+          WORKSPACE: ${{ inputs.workspace_name }}
+          WORKSPACE_PROJECT: ${{ inputs.workspace_project }}
+          TERRAFORM_VERSION: ${{ inputs.terraform_version }}
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          VCS_REPO_IDENTIFIER: ${{ secrets.VCS_OAUTH_TOKEN_ID != '' && github.repository || '' }}
+          VCS_OAUTH_TOKEN_ID: ${{ secrets.VCS_OAUTH_TOKEN_ID }}
+          VCS_BRANCH: ${{ inputs.vcs_branch }}
+          VCS_TAGS_REGEX: ${{ inputs.vcs_tags_regex }}
+          ENABLE_TFE_TOKEN_ENV_VAR: ${{ inputs.enable_tfe_token_env_var }}
+        run: |
+          set -euo pipefail
+
+          API_BASE="https://app.terraform.io/api/v2"
+          project_id=""
+          workspace_exists="false"
+
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq is required for workspace payload construction." >&2
+            exit 1
+          fi
+
+          echo "Checking if workspace '$WORKSPACE' exists in organization '$ORG'..."
+          check_status=$(curl -sS -o workspace_check.json -w "%{http_code}" \
+            -H "Authorization: Bearer $TFC_TOKEN" \
+            -H "Content-Type: application/vnd.api+json" \
+            "$API_BASE/organizations/$ORG/workspaces/$WORKSPACE")
+
+          if [ "$check_status" = "200" ]; then
+            workspace_exists="true"
+            echo "Workspace '$WORKSPACE' already exists. Creation will be skipped and run settings will be enforced."
+          elif [ "$check_status" != "404" ]; then
+            echo "Failed to verify workspace existence (HTTP $check_status)."
+            cat workspace_check.json
+            exit 1
+          fi
+
+          if [ "$workspace_exists" = "false" ]; then
+            if [[ "$WORKSPACE_PROJECT" == prj-* ]]; then
+              project_id="$WORKSPACE_PROJECT"
+              echo "Using provided project id '$project_id'."
+            else
+              echo "Resolving project id for project name '$WORKSPACE_PROJECT' in organization '$ORG'..."
+
+              projects_status=$(curl -sS -o projects_list.json -w "%{http_code}" \
+                -H "Authorization: Bearer $TFC_TOKEN" \
+                -H "Content-Type: application/vnd.api+json" \
+                "$API_BASE/organizations/$ORG/projects?page%5Bsize%5D=100")
+
+              if [ "$projects_status" != "200" ]; then
+                echo "Failed to list projects for organization '$ORG' (HTTP $projects_status)." >&2
+                cat projects_list.json
+                exit 1
+              fi
+
+              project_id=$(jq -r --arg project_name "$WORKSPACE_PROJECT" '.data[] | select(.attributes.name == $project_name) | .id' projects_list.json | head -n 1)
+
+              if [ -z "$project_id" ] || [ "$project_id" = "null" ]; then
+                echo "Project '$WORKSPACE_PROJECT' was not found in organization '$ORG'." >&2
+                exit 1
+              fi
+            fi
+
+            if [[ -n "$VCS_REPO_IDENTIFIER" || -n "$VCS_OAUTH_TOKEN_ID" ]]; then
+              if [[ -z "$VCS_REPO_IDENTIFIER" || -z "$VCS_OAUTH_TOKEN_ID" ]]; then
+                echo "Both vcs_repo_identifier and vcs_oauth_token_id must be provided together." >&2
+                exit 1
+              fi
+            fi
+
+            workspace_payload=$(jq -n \
+              --arg workspace "$WORKSPACE" \
+              --arg project_id "$project_id" \
+              --arg terraform_version "$TERRAFORM_VERSION" \
+              --arg working_directory "$WORKING_DIRECTORY" \
+              --arg vcs_repo_identifier "$VCS_REPO_IDENTIFIER" \
+              --arg vcs_oauth_token_id "$VCS_OAUTH_TOKEN_ID" \
+              --arg vcs_branch "$VCS_BRANCH" \
+              --arg vcs_tags_regex "$VCS_TAGS_REGEX" \
+              '{
+                data: {
+                  type: "workspaces",
+                  attributes: (
+                    {
+                      name: $workspace,
+                      "auto-apply": false,
+                      "auto-apply-run-trigger": false,
+                      "speculative-enabled": false,
+                      "queue-all-runs": false
+                    }
+                    + (if $terraform_version != "" then { terraform_version: $terraform_version } else {} end)
+                    + (if $working_directory != "" then { "working-directory": $working_directory } else {} end)
+                    + (if $vcs_repo_identifier != "" then {
+                        "vcs-repo": {
+                          identifier: $vcs_repo_identifier,
+                          "oauth-token-id": $vcs_oauth_token_id,
+                          branch: $vcs_branch,
+                          "tags-regex": (if $vcs_tags_regex == "" then null else $vcs_tags_regex end)
+                        }
+                      } else {} end)
+                  ),
+                  relationships: {
+                    project: {
+                      data: {
+                        type: "projects",
+                        id: $project_id
+                      }
+                    }
+                  }
+                }
+              }')
+
+            printf '%s\n' "$workspace_payload" > workspace_create_payload.json
+
+            echo "Workspace '$WORKSPACE' not found. Creating it in project '$WORKSPACE_PROJECT'..."
+            create_status=$(curl -sS -o workspace_create.json -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $TFC_TOKEN" \
+              -H "Content-Type: application/vnd.api+json" \
+              -d @workspace_create_payload.json \
+              "$API_BASE/organizations/$ORG/workspaces")
+
+            if [ "$create_status" = "201" ]; then
+              echo "Workspace '$WORKSPACE' created successfully."
+            else
+              echo "Workspace creation failed (HTTP $create_status)."
+              cat workspace_create.json
+              exit 1
+            fi
+          fi
+
+          workspace_id=""
+          if [ "$workspace_exists" = "true" ]; then
+            workspace_id=$(jq -r '.data.id // empty' workspace_check.json)
+          else
+            workspace_id=$(jq -r '.data.id // empty' workspace_create.json)
+          fi
+
+          if [ -z "$workspace_id" ]; then
+            echo "Unable to determine workspace id for '$WORKSPACE'." >&2
+            exit 1
+          fi
+
+          if [ "$ENABLE_TFE_TOKEN_ENV_VAR" = "true" ]; then
+            echo "Ensuring sensitive env variable TFE_TOKEN exists on workspace '$WORKSPACE'..."
+            vars_status=$(curl -sS -o workspace_vars.json -w "%{http_code}" \
+              -H "Authorization: Bearer $TFC_TOKEN" \
+              -H "Content-Type: application/vnd.api+json" \
+              "$API_BASE/workspaces/$workspace_id/vars")
+
+            if [ "$vars_status" != "200" ]; then
+              echo "Failed to list workspace variables (HTTP $vars_status)." >&2
+              cat workspace_vars.json
+              exit 1
+            fi
+
+            tfe_token_var_id=$(jq -r '.data[] | select(.attributes.key == "TFE_TOKEN" and .attributes.category == "env") | .id' workspace_vars.json | head -n 1)
+
+            if [ -n "$tfe_token_var_id" ] && [ "$tfe_token_var_id" != "null" ]; then
+              tfe_token_patch_payload=$(jq -n \
+                --arg token "$TFC_TOKEN" \
+                '{
+                  data: {
+                    type: "vars",
+                    attributes: {
+                      value: $token,
+                      sensitive: true,
+                      hcl: false
+                    }
+                  }
+                }')
+
+              tfe_var_patch_status=$(curl -sS -o tfe_token_var_patch.json -w "%{http_code}" -X PATCH \
+                -H "Authorization: Bearer $TFC_TOKEN" \
+                -H "Content-Type: application/vnd.api+json" \
+                -d "$tfe_token_patch_payload" \
+                "$API_BASE/vars/$tfe_token_var_id")
+
+              if [ "$tfe_var_patch_status" != "200" ]; then
+                echo "Failed to update TFE_TOKEN variable (HTTP $tfe_var_patch_status)." >&2
+                cat tfe_token_var_patch.json
+                exit 1
+              fi
+            else
+              tfe_token_create_payload=$(jq -n \
+                --arg key "TFE_TOKEN" \
+                --arg token "$TFC_TOKEN" \
+                '{
+                  data: {
+                    type: "vars",
+                    attributes: {
+                      key: $key,
+                      value: $token,
+                      category: "env",
+                      hcl: false,
+                      sensitive: true
+                    }
+                  }
+                }')
+
+              tfe_var_create_status=$(curl -sS -o tfe_token_var_create.json -w "%{http_code}" -X POST \
+                -H "Authorization: Bearer $TFC_TOKEN" \
+                -H "Content-Type: application/vnd.api+json" \
+                -d "$tfe_token_create_payload" \
+                "$API_BASE/workspaces/$workspace_id/vars")
+
+              if [ "$tfe_var_create_status" != "201" ]; then
+                echo "Failed to create TFE_TOKEN variable (HTTP $tfe_var_create_status)." >&2
+                cat tfe_token_var_create.json
+                exit 1
+              fi
+            fi
+          else
+            echo "Skipping TFE_TOKEN workspace env var upsert (enable_tfe_token_env_var=false)."
+          fi
+
+          workspace_update_payload=$(jq -n \
+            '{
+              data: {
+                type: "workspaces",
+                attributes: {
+                  "auto-apply": false,
+                  "auto-apply-run-trigger": false,
+                  "speculative-enabled": false,
+                  "queue-all-runs": false,
+                  "file-triggers-enabled": true,
+                  "trigger-patterns": ["/__tfc_no_automatic_runs__/**"]
+                }
+              }
+            }')
+
+          printf '%s\n' "$workspace_update_payload" > workspace_update_payload.json
+
+          echo "Enforcing non-automatic run settings for workspace '$WORKSPACE'..."
+          update_status=$(curl -sS -o workspace_update.json -w "%{http_code}" -X PATCH \
+            -H "Authorization: Bearer $TFC_TOKEN" \
+            -H "Content-Type: application/vnd.api+json" \
+            -d @workspace_update_payload.json \
+            "$API_BASE/organizations/$ORG/workspaces/$WORKSPACE")
+
+          if [ "$update_status" = "200" ]; then
+            echo "Workspace '$WORKSPACE' run settings enforced successfully."
+          else
+            echo "Workspace settings update failed (HTTP $update_status)."
+            cat workspace_update.json
+            exit 1
+          fi
