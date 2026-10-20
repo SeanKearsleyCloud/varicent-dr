@@ -16,7 +16,7 @@ recovery_services_vault_name    = "RSV-CE-NONPRD-IGM-LGCY"
 recovery_services_vault_rg_name = "RG-CE-NONPRD-IGM-LGCY-RSV"
 
 # Replication and Recovery Plan
-recovery_plan_name      = "IBMCognIncvCompMgt-NONPRD-DR"
+recovery_plan_name = "IBMCognIncvCompMgt-NONPRD-DR"
 
 # Backup and Protection Items
 # Confirm this is the Azure Backup policy in the vault; details.txt identifies the replication policy only.
@@ -25,21 +25,6 @@ failed_over_backup_policy_name = "RSV-CE-NONPRD-IGM-LGCY-BACKUP-POLICY"
 # Set test_failover_network_id to a dedicated test VNet resource ID for test_failover.
 
 replicated_vms = {
-  "FCOCOMDBL4" = {
-    target_rg                       = "RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01"
-    base_rg                         = "RG-CC-IG-LGCY-NONPRD-CMOD-APPS-01"
-    recovery_vm_name                = "FCOCOMDBL4-replicated"
-    replication_protected_item_name = "FCOCOMDBL4-replicated"
-    replication_policy_name         = "Daily"
-    disks = [
-      "FCOCOMDBL4-OSdisk-00",
-      "FCOCOMDBl4-datadisk-15",
-      "FCOCOMDBL4-datadisk-07",
-      "FCOCOMDBL4-datadisk-01",
-      "FCOCOMDBl4-datadisk-14",
-      "FCOCOMDBl4-datadisk-13",
-    ]
-  }
   "FCOCOMFSD1" = {
     target_rg                       = "RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01"
     base_rg                         = "RG-CC-IG-LGCY-NONPRD-CMOD-APPS-01"
