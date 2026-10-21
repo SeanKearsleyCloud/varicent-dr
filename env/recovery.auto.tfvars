@@ -27,7 +27,7 @@ backup_protected_item_ids = {
     "FCOCOMFSD1" = "/subscriptions/cef264a3-c295-4f8f-a3f2-a44ac311a44d/resourceGroups/RG-CC-NONPRD-IGM-LGCY-RSV/providers/Microsoft.RecoveryServices/vaults/RSV-CC-NONPRD-IGM-LGCY/backupFabrics/Azure/protectionContainers/IaasVMContainer;iaasvmcontainerv2;RG-CC-IG-LGCY-NONPRD-CMOD-APPS-01;FCOCOMFSD1/protectedItems/VM;iaasvmcontainerv2;RG-CC-IG-LGCY-NONPRD-CMOD-APPS-01;FCOCOMFSD1"
   }
   recovery = {
-    "FCOCOMFSD1" = "/subscriptions/cef264a3-c295-4f8f-a3f2-a44ac311a44d/resourceGroups/RG-CE-NONPRD-IGM-LGCY-RSV/providers/Microsoft.RecoveryServices/vaults/RSV-CE-NONPRD-IGM-LGCY/backupFabrics/Azure/protectionContainers/IaasVMContainer;iaasvmcontainerv2;RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01;FCOCOMFSD1/protectedItems/VM;iaasvmcontainerv2;RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01;fcocomfsd1-replicated"
+    "fcocomfsd1-replicated" = "/subscriptions/cef264a3-c295-4f8f-a3f2-a44ac311a44d/resourceGroups/RG-CE-NONPRD-IGM-LGCY-RSV/providers/Microsoft.RecoveryServices/vaults/RSV-CE-NONPRD-IGM-LGCY/backupFabrics/Azure/protectionContainers/IaasVMContainer;iaasvmcontainerv2;RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01;fcocomfsd1-replicated/protectedItems/VM;iaasvmcontainerv2;RG-CE-IG-LGCY-NONPRD-CMOD-APPS-01;fcocomfsd1-replicated"
   }
 }
 
