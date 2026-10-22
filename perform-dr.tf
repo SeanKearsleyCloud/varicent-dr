@@ -230,10 +230,6 @@ resource "azurerm_backup_protected_vm" "vm_bkp" {
   source_vm_id        = each.value.id
   backup_policy_id    = data.azurerm_backup_policy_vm.backup_policy[0].id
 
-  lifecycle {
-    prevent_destroy = true
-  }
-
   depends_on = [
     azapi_resource_action.unplanned_failover,
     azapi_resource_action.commit,
