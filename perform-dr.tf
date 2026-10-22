@@ -224,7 +224,7 @@ data "azurerm_backup_policy_vm" "backup_policy" {
 
 # Backup for failed over VM
 resource "azurerm_backup_protected_vm" "vm_bkp" {
-  for_each            = var.dr_direction == "PrimaryToRecovery" && (var.dr_failover_action == "switch" || var.dr_failover_action == "commit") ? data.azurerm_virtual_machine.vms : {}
+  for_each            = var.dr_direction == "PrimaryToRecovery" && (var.dr_failover_action == "switch" || var.dr_failover_action == "commit") || var.dr_direction == "RecoveryToPrimary" && var.dr_failover_action == "backup" ? data.azurerm_virtual_machine.vms : {}
   resource_group_name = var.recovery_services_vault_rg_name
   recovery_vault_name = var.recovery_services_vault_name
   source_vm_id        = each.value.id
